@@ -1,0 +1,40 @@
+{
+    "name": "sevk/sevk-php",
+    "version": "0.0.1",
+    "description": "PHP SDK for Sevk API",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["sevk", "email", "api", "sdk"],
+    "homepage": "https://sevk.io",
+    "authors": [
+        {
+            "name": "Sevk",
+            "email": "dev@sevk.io"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "vlucas/phpdotenv": "^5.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Sevk\\": "src/"
+        },
+        "files": [
+            "src/Markup/render.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Sevk\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "minimum-stability": "stable"
+}
