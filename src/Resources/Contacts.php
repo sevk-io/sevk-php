@@ -52,4 +52,19 @@ class Contacts
     {
         return $this->client->delete("contacts/{$contactId}");
     }
+
+    public function bulkUpdate(array $updates): array
+    {
+        return $this->client->put('contacts/bulk-update', $updates);
+    }
+
+    public function import(array $params): array
+    {
+        return $this->client->post('contacts/import', $params);
+    }
+
+    public function getEvents(string $contactId): array
+    {
+        return $this->client->get("contacts/{$contactId}/events");
+    }
 }

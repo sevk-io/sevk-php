@@ -50,4 +50,19 @@ class Topics
     {
         return $this->client->delete("/audiences/{$audienceId}/topics/{$topicId}");
     }
+
+    public function addContacts(string $audienceId, string $topicId, array $params): array
+    {
+        return $this->client->post("/audiences/{$audienceId}/topics/{$topicId}/contacts", $params);
+    }
+
+    public function removeContact(string $audienceId, string $topicId, string $contactId): array
+    {
+        return $this->client->delete("/audiences/{$audienceId}/topics/{$topicId}/contacts/{$contactId}");
+    }
+
+    public function listContacts(string $audienceId, string $topicId, array $params = []): array
+    {
+        return $this->client->get("/audiences/{$audienceId}/topics/{$topicId}/contacts", $params ?: null);
+    }
 }

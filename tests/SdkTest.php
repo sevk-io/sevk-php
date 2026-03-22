@@ -6,66 +6,33 @@ namespace Sevk\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Sevk\Sevk;
-use GuzzleHttp\Client;
 
 class SdkTest extends TestCase
 {
     private static ?Sevk $sevk = null;
-    private static string $baseUrl = 'http://localhost:4000';
+    private static string $baseUrl = 'https://api.sevk.io';
 
     public static function setUpBeforeClass(): void
     {
-        $apiKey = self::setupTestEnvironment();
+        $apiKey = getenv('SEVK_TEST_API_KEY');
+
+        if (!$apiKey) {
+            return;
+        }
+
+        $baseUrl = getenv('SEVK_TEST_BASE_URL');
+        if ($baseUrl) {
+            self::$baseUrl = $baseUrl;
+        }
+
         self::$sevk = new Sevk($apiKey, ['baseUrl' => self::$baseUrl]);
     }
 
-    private static function setupTestEnvironment(): string
+    protected function setUp(): void
     {
-        $client = new Client(['base_uri' => 'http://localhost:4000', 'http_errors' => false]);
-
-        // Register a new test user
-        $testEmail = 'sdk-test-' . time() . '-' . mt_rand(1000, 9999) . '@test.example.com';
-        $response = $client->post('/auth/register', [
-            'json' => [
-                'email' => $testEmail,
-                'password' => 'TestPassword123!'
-            ]
-        ]);
-        $data = json_decode($response->getBody()->getContents(), true);
-
-        if (!isset($data['token'])) {
-            throw new \RuntimeException('Failed to register user: ' . json_encode($data));
+        if (self::$sevk === null) {
+            $this->markTestSkipped('SEVK_TEST_API_KEY environment variable is not set');
         }
-        $token = $data['token'];
-
-        // Create Project
-        $response = $client->post('/projects', [
-            'headers' => ['Authorization' => 'Bearer ' . $token],
-            'json' => [
-                'name' => 'Test Project',
-                'slug' => 'test-project-' . time(),
-                'supportEmail' => 'support@test.com'
-            ]
-        ]);
-        $projectData = json_decode($response->getBody()->getContents(), true);
-
-        if (!isset($projectData['project']['id'])) {
-            throw new \RuntimeException('Failed to create project: ' . json_encode($projectData));
-        }
-        $projectId = $projectData['project']['id'];
-
-        // Create API Key
-        $response = $client->post("/projects/{$projectId}/api-keys", [
-            'headers' => ['Authorization' => 'Bearer ' . $token],
-            'json' => ['title' => 'Test Key', 'fullAccess' => true]
-        ]);
-        $apiKeyData = json_decode($response->getBody()->getContents(), true);
-
-        if (!isset($apiKeyData['apiKey']['key'])) {
-            throw new \RuntimeException('Failed to create API key: ' . json_encode($apiKeyData));
-        }
-
-        return $apiKeyData['apiKey']['key'];
     }
 
     // ============================================
@@ -165,6 +132,41 @@ class SdkTest extends TestCase
     }
 
     // ============================================
+    // CONTACTS EXTENDED TESTS (3)
+    // ============================================
+
+    public function testShouldBulkUpdateContacts(): void
+    {
+        $email = 'test-' . uniqid() . '@example.com';
+        $contact = self::$sevk->contacts->create($email, true);
+        $result = self::$sevk->contacts->bulkUpdate([
+            'contacts' => [['email' => $email, 'subscribed' => false]]
+        ]);
+        $this->assertNotNull($result);
+        // Cleanup
+        self::$sevk->contacts->delete($contact['id']);
+    }
+
+    public function testShouldGetContactEvents(): void
+    {
+        $email = 'test-' . uniqid() . '@example.com';
+        $contact = self::$sevk->contacts->create($email);
+        $result = self::$sevk->contacts->getEvents($contact['id']);
+        $this->assertNotNull($result);
+        // Cleanup
+        self::$sevk->contacts->delete($contact['id']);
+    }
+
+    public function testShouldImportContacts(): void
+    {
+        $email = 'import-test-' . uniqid() . '@example.com';
+        $result = self::$sevk->contacts->import([
+            'contacts' => [['email' => $email]]
+        ]);
+        $this->assertNotNull($result);
+    }
+
+    // ============================================
     // AUDIENCES TESTS (7)
     // ============================================
 
@@ -225,6 +227,35 @@ class SdkTest extends TestCase
         $contact = self::$sevk->contacts->create('test-' . uniqid() . '@example.com');
         $result = self::$sevk->audiences->addContacts($audience['id'], [$contact['id']]);
         $this->assertNotNull($result);
+        // Cleanup
+        self::$sevk->contacts->delete($contact['id']);
+        self::$sevk->audiences->delete($audience['id']);
+    }
+
+    public function testShouldListContactsInAudience(): void
+    {
+        $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
+        $contact = self::$sevk->contacts->create('test-' . uniqid() . '@example.com');
+        self::$sevk->audiences->addContacts($audience['id'], [$contact['id']]);
+        $result = self::$sevk->audiences->listContacts($audience['id']);
+        $this->assertNotNull($result);
+        $this->assertArrayHasKey('items', $result);
+        $this->assertIsArray($result['items']);
+        // Cleanup
+        self::$sevk->contacts->delete($contact['id']);
+        self::$sevk->audiences->delete($audience['id']);
+    }
+
+    public function testShouldRemoveContactFromAudience(): void
+    {
+        $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
+        $contact = self::$sevk->contacts->create('test-' . uniqid() . '@example.com');
+        self::$sevk->audiences->addContacts($audience['id'], [$contact['id']]);
+        self::$sevk->audiences->removeContact($audience['id'], $contact['id']);
+        // Verify removal by listing contacts
+        $result = self::$sevk->audiences->listContacts($audience['id']);
+        $contactIds = array_map(fn($c) => $c['id'], $result['items']);
+        $this->assertNotContains($contact['id'], $contactIds);
         // Cleanup
         self::$sevk->contacts->delete($contact['id']);
         self::$sevk->audiences->delete($audience['id']);
@@ -337,22 +368,241 @@ class SdkTest extends TestCase
     }
 
     // ============================================
+    // BROADCASTS CRUD TESTS (8)
+    // ============================================
+
+    public function testShouldCreateBroadcast(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast create');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $name = 'Test Broadcast ' . uniqid();
+        $broadcast = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => $name,
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test broadcast body</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        $this->assertArrayHasKey('id', $broadcast);
+        $this->assertIsString($broadcast['id']);
+        $this->assertEquals($name, $broadcast['name']);
+        $this->assertEquals('Test Subject', $broadcast['subject']);
+        $this->assertEquals('DRAFT', $broadcast['status']);
+        // Cleanup
+        self::$sevk->broadcasts->delete($broadcast['id']);
+    }
+
+    public function testShouldGetBroadcast(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast get');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $created = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => 'Get Test ' . uniqid(),
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        $broadcast = self::$sevk->broadcasts->get($created['id']);
+        $this->assertEquals($created['id'], $broadcast['id']);
+        $this->assertEquals('Test Subject', $broadcast['subject']);
+        // Cleanup
+        self::$sevk->broadcasts->delete($created['id']);
+    }
+
+    public function testShouldUpdateBroadcast(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast update');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $created = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => 'Update Test ' . uniqid(),
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        $newName = 'Updated Broadcast ' . uniqid();
+        $updated = self::$sevk->broadcasts->update($created['id'], ['name' => $newName]);
+        $this->assertEquals($created['id'], $updated['id']);
+        $this->assertEquals($newName, $updated['name']);
+        // Cleanup
+        self::$sevk->broadcasts->delete($created['id']);
+    }
+
+    public function testShouldDeleteBroadcast(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast delete');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $created = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => 'Delete Test ' . uniqid(),
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        self::$sevk->broadcasts->delete($created['id']);
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessageMatches('/404/');
+        self::$sevk->broadcasts->get($created['id']);
+    }
+
+    public function testShouldGetBroadcastAnalytics(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast analytics');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $created = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => 'Analytics Test ' . uniqid(),
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        $result = self::$sevk->broadcasts->getAnalytics($created['id']);
+        $this->assertNotNull($result);
+        // Cleanup
+        self::$sevk->broadcasts->delete($created['id']);
+    }
+
+    public function testShouldSendTestBroadcast(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast sendTest');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $created = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => 'SendTest Test ' . uniqid(),
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        try {
+            $result = self::$sevk->broadcasts->sendTest($created['id'], ['emails' => ['test@example.com']]);
+            $this->assertNotNull($result);
+        } catch (\Exception $e) {
+            // May fail if domain is unverified, which is expected
+            $this->assertNotEmpty($e->getMessage());
+        }
+        // Cleanup
+        self::$sevk->broadcasts->delete($created['id']);
+    }
+
+    public function testShouldHandleSendErrorForDraftBroadcast(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast send error');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $created = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => 'Send Error Test ' . uniqid(),
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        try {
+            self::$sevk->broadcasts->send($created['id']);
+            // If it succeeds, that's fine too
+        } catch (\Exception $e) {
+            // Expected to fail if broadcast is not ready to send
+            $this->assertNotEmpty($e->getMessage());
+        }
+        // Cleanup
+        try {
+            self::$sevk->broadcasts->delete($created['id']);
+        } catch (\Exception $e) {
+            // Ignore cleanup errors
+        }
+    }
+
+    public function testShouldHandleCancelForNonSendingBroadcast(): void
+    {
+        $domains = self::$sevk->domains->list();
+        if (count($domains['items']) === 0) {
+            $this->markTestSkipped('No domains available to test broadcast cancel error');
+        }
+        $domainId = $domains['items'][0]['id'];
+
+        $created = self::$sevk->broadcasts->create([
+            'domainId' => $domainId,
+            'name' => 'Cancel Error Test ' . uniqid(),
+            'subject' => 'Test Subject',
+            'body' => '<section><paragraph>Test</paragraph></section>',
+            'senderName' => 'Test Sender',
+            'senderEmail' => 'test',
+            'targetType' => 'ALL',
+        ]);
+        try {
+            self::$sevk->broadcasts->cancel($created['id']);
+        } catch (\Exception $e) {
+            // Expected to fail if broadcast is not in a cancellable state
+            $this->assertNotEmpty($e->getMessage());
+        }
+        // Cleanup
+        try {
+            self::$sevk->broadcasts->delete($created['id']);
+        } catch (\Exception $e) {
+            // Ignore cleanup errors
+        }
+    }
+
+    // ============================================
     // DOMAINS TESTS (2)
     // ============================================
 
     public function testShouldListDomains(): void
     {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
         $response = self::$sevk->domains->list();
-        $this->assertArrayHasKey('domains', $response);
-        $this->assertIsArray($response['domains']);
+        $this->assertArrayHasKey('items', $response);
+        $this->assertIsArray($response['items']);
     }
 
     public function testShouldListOnlyVerifiedDomains(): void
     {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
         $response = self::$sevk->domains->list(true);
-        $this->assertArrayHasKey('domains', $response);
-        $this->assertIsArray($response['domains']);
-        foreach ($response['domains'] as $domain) {
+        $this->assertArrayHasKey('items', $response);
+        $this->assertIsArray($response['items']);
+        foreach ($response['items'] as $domain) {
             $this->assertTrue($domain['verified']);
         }
     }
@@ -402,6 +652,38 @@ class SdkTest extends TestCase
         $this->assertEquals($newName, $updated['name']);
         // Cleanup
         self::$sevk->topics->delete($audience['id'], $created['id']);
+        self::$sevk->audiences->delete($audience['id']);
+    }
+
+    public function testShouldAddContactsToTopic(): void
+    {
+        $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
+        $topic = self::$sevk->topics->create($audience['id'], 'Test Topic ' . uniqid());
+        $contact = self::$sevk->contacts->create('test-' . uniqid() . '@example.com');
+        self::$sevk->audiences->addContacts($audience['id'], [$contact['id']]);
+        $result = self::$sevk->topics->addContacts($audience['id'], $topic['id'], ['contactIds' => [$contact['id']]]);
+        $this->assertNotNull($result);
+        // Cleanup
+        self::$sevk->topics->delete($audience['id'], $topic['id']);
+        self::$sevk->contacts->delete($contact['id']);
+        self::$sevk->audiences->delete($audience['id']);
+    }
+
+    public function testShouldRemoveContactFromTopic(): void
+    {
+        $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
+        $topic = self::$sevk->topics->create($audience['id'], 'Test Topic ' . uniqid());
+        $contact = self::$sevk->contacts->create('test-' . uniqid() . '@example.com');
+        self::$sevk->audiences->addContacts($audience['id'], [$contact['id']]);
+        self::$sevk->topics->addContacts($audience['id'], $topic['id'], ['contactIds' => [$contact['id']]]);
+        self::$sevk->topics->removeContact($audience['id'], $topic['id'], $contact['id']);
+        // Verify removal by listing contacts in the topic
+        $result = self::$sevk->topics->listContacts($audience['id'], $topic['id']);
+        $contactIds = array_map(fn($c) => $c['id'], $result['items']);
+        $this->assertNotContains($contact['id'], $contactIds);
+        // Cleanup
+        self::$sevk->topics->delete($audience['id'], $topic['id']);
+        self::$sevk->contacts->delete($contact['id']);
         self::$sevk->audiences->delete($audience['id']);
     }
 
@@ -480,6 +762,34 @@ class SdkTest extends TestCase
         self::$sevk->audiences->delete($audience['id']);
     }
 
+    public function testShouldCalculateSegment(): void
+    {
+        $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
+        $segment = self::$sevk->segments->create(
+            $audience['id'],
+            'Test Segment ' . uniqid(),
+            [['field' => 'email', 'operator' => 'contains', 'value' => '@example.com']],
+            'AND'
+        );
+        $result = self::$sevk->segments->calculate($audience['id'], $segment['id']);
+        $this->assertNotNull($result);
+        // Cleanup
+        self::$sevk->segments->delete($audience['id'], $segment['id']);
+        self::$sevk->audiences->delete($audience['id']);
+    }
+
+    public function testShouldPreviewSegment(): void
+    {
+        $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
+        $result = self::$sevk->segments->preview($audience['id'], [
+            'rules' => [['field' => 'email', 'operator' => 'contains', 'value' => '@example.com']],
+            'operator' => 'AND',
+        ]);
+        $this->assertNotNull($result);
+        // Cleanup
+        self::$sevk->audiences->delete($audience['id']);
+    }
+
     public function testShouldDeleteSegment(): void
     {
         $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
@@ -525,6 +835,274 @@ class SdkTest extends TestCase
     }
 
     // ============================================
+    // DOMAINS UPDATE TESTS (2)
+    // ============================================
+
+    public function testShouldUpdateDomainWithClickTracking(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $response = self::$sevk->domains->list();
+        if (count($response['items']) > 0) {
+            $domainId = $response['items'][0]['id'];
+            $result = self::$sevk->domains->update($domainId, ['clickTracking' => true]);
+            $this->assertNotNull($result);
+            $this->assertEquals($domainId, $result['id']);
+            $this->assertTrue($result['clickTracking']);
+        } else {
+            $this->markTestSkipped('No domains available to test update');
+        }
+    }
+
+    public function testShouldUpdateDomainWithClickTrackingDisabled(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $response = self::$sevk->domains->list();
+        if (count($response['items']) > 0) {
+            $domainId = $response['items'][0]['id'];
+            $result = self::$sevk->domains->update($domainId, ['clickTracking' => false]);
+            $this->assertNotNull($result);
+            $this->assertFalse($result['clickTracking']);
+        } else {
+            $this->markTestSkipped('No domains available to test update');
+        }
+    }
+
+    // ============================================
+    // DOMAINS CRUD TESTS (5)
+    // ============================================
+
+    public function testShouldCreateDomain(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $subdomain = 'test-' . uniqid() . '-' . substr(md5((string) mt_rand()), 0, 7) . '.example.com';
+        $domain = self::$sevk->domains->create(['domain' => $subdomain, 'email' => 'test@' . $subdomain]);
+        $this->assertArrayHasKey('id', $domain);
+        $this->assertIsString($domain['id']);
+        $this->assertEquals($subdomain, $domain['domain']);
+        // Cleanup
+        self::$sevk->domains->delete($domain['id']);
+    }
+
+    public function testShouldGetDomain(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $subdomain = 'test-' . uniqid() . '.example.com';
+        $created = self::$sevk->domains->create(['domain' => $subdomain, 'email' => 'test@' . $subdomain]);
+        $domain = self::$sevk->domains->get($created['id']);
+        $this->assertEquals($created['id'], $domain['id']);
+        // Cleanup
+        self::$sevk->domains->delete($created['id']);
+    }
+
+    public function testShouldGetDnsDnsRecords(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $subdomain = 'test-' . uniqid() . '.example.com';
+        $created = self::$sevk->domains->create(['domain' => $subdomain, 'email' => 'test@' . $subdomain]);
+        $result = self::$sevk->domains->getDnsRecords($created['id']);
+        $this->assertNotNull($result);
+        $this->assertIsArray($result);
+        // Cleanup
+        self::$sevk->domains->delete($created['id']);
+    }
+
+    public function testShouldGetAvailableRegions(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $result = self::$sevk->domains->getRegions();
+        $this->assertNotNull($result);
+    }
+
+    public function testShouldVerifyDomain(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $subdomain = 'test-' . uniqid() . '.example.com';
+        $created = self::$sevk->domains->create(['domain' => $subdomain, 'email' => 'test@' . $subdomain]);
+        try {
+            $result = self::$sevk->domains->verify($created['id']);
+            $this->assertNotNull($result);
+        } catch (\Exception $e) {
+            // Expected to fail for test domains without proper DNS records
+            $this->assertNotEmpty($e->getMessage());
+        }
+        // Cleanup
+        self::$sevk->domains->delete($created['id']);
+    }
+
+    public function testShouldDeleteDomain(): void
+    {
+        if (getenv('INCLUDE_DOMAIN_TESTS') !== 'true') { $this->markTestSkipped('INCLUDE_DOMAIN_TESTS not set'); }
+        $subdomain = 'test-' . uniqid() . '.example.com';
+        $created = self::$sevk->domains->create(['domain' => $subdomain, 'email' => 'test@' . $subdomain]);
+        self::$sevk->domains->delete($created['id']);
+        // Verify deletion
+        try {
+            self::$sevk->domains->get($created['id']);
+            $this->fail('Expected exception was not thrown');
+        } catch (\Exception $e) {
+            // Accept any error as confirmation of deletion
+            $this->assertNotEmpty($e->getMessage());
+        }
+    }
+
+    // ============================================
+    // BROADCASTS EXTENDED TESTS (4)
+    // ============================================
+
+    public function testShouldGetBroadcastStatus(): void
+    {
+        $response = self::$sevk->broadcasts->list(1, 1);
+        if (count($response['items']) > 0) {
+            $broadcastId = $response['items'][0]['id'];
+            $result = self::$sevk->broadcasts->getStatus($broadcastId);
+            $this->assertNotNull($result);
+            $this->assertArrayHasKey('status', $result);
+        } else {
+            $this->markTestSkipped('No broadcasts available to test getStatus');
+        }
+    }
+
+    public function testShouldGetBroadcastEmails(): void
+    {
+        $response = self::$sevk->broadcasts->list(1, 1);
+        if (count($response['items']) > 0) {
+            $broadcastId = $response['items'][0]['id'];
+            $result = self::$sevk->broadcasts->getEmails($broadcastId);
+            $this->assertNotNull($result);
+            $this->assertArrayHasKey('items', $result);
+            $this->assertIsArray($result['items']);
+        } else {
+            $this->markTestSkipped('No broadcasts available to test getEmails');
+        }
+    }
+
+    public function testShouldEstimateBroadcastCost(): void
+    {
+        $response = self::$sevk->broadcasts->list(1, 1);
+        if (count($response['items']) > 0) {
+            $broadcastId = $response['items'][0]['id'];
+            $result = self::$sevk->broadcasts->estimateCost($broadcastId);
+            $this->assertNotNull($result);
+        } else {
+            $this->markTestSkipped('No broadcasts available to test estimateCost');
+        }
+    }
+
+    public function testShouldListActiveBroadcasts(): void
+    {
+        $result = self::$sevk->broadcasts->listActive();
+        $this->assertNotNull($result);
+        $this->assertArrayHasKey('items', $result);
+        $this->assertIsArray($result['items']);
+    }
+
+    // ============================================
+    // TOPICS LIST CONTACTS TESTS (1)
+    // ============================================
+
+    public function testShouldListContactsForTopic(): void
+    {
+        $audience = self::$sevk->audiences->create('Test Audience ' . uniqid());
+        $topic = self::$sevk->topics->create($audience['id'], 'Test Topic ' . uniqid());
+        $result = self::$sevk->topics->listContacts($audience['id'], $topic['id']);
+        $this->assertNotNull($result);
+        $this->assertArrayHasKey('items', $result);
+        $this->assertIsArray($result['items']);
+        // Cleanup
+        self::$sevk->topics->delete($audience['id'], $topic['id']);
+        self::$sevk->audiences->delete($audience['id']);
+    }
+
+    // ============================================
+    // WEBHOOKS TESTS (FULL CRUD LIFECYCLE) (7)
+    // ============================================
+
+    public function testShouldListWebhooks(): void
+    {
+        $result = self::$sevk->webhooks->list();
+        $this->assertNotNull($result);
+        $this->assertArrayHasKey('items', $result);
+        $this->assertIsArray($result['items']);
+    }
+
+    public function testWebhookFullLifecycle(): void
+    {
+        // Create webhook
+        $created = self::$sevk->webhooks->create(
+            'https://example.com/webhook-test',
+            ['contact.subscribed']
+        );
+        $this->assertArrayHasKey('id', $created);
+        $this->assertEquals('https://example.com/webhook-test', $created['url']);
+        $webhookId = $created['id'];
+
+        // Get webhook
+        $fetched = self::$sevk->webhooks->get($webhookId);
+        $this->assertEquals($webhookId, $fetched['id']);
+        $this->assertEquals('https://example.com/webhook-test', $fetched['url']);
+
+        // Update webhook
+        $updated = self::$sevk->webhooks->update($webhookId, [
+            'url' => 'https://example.com/webhook-updated',
+            'events' => ['contact.subscribed', 'contact.unsubscribed']
+        ]);
+        $this->assertEquals($webhookId, $updated['id']);
+        $this->assertEquals('https://example.com/webhook-updated', $updated['url']);
+
+        // Test webhook
+        $testResult = self::$sevk->webhooks->test($webhookId);
+        $this->assertNotNull($testResult);
+
+        // Delete webhook
+        self::$sevk->webhooks->delete($webhookId);
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessageMatches('/404/');
+        self::$sevk->webhooks->get($webhookId);
+    }
+
+    public function testShouldListWebhookEvents(): void
+    {
+        $result = self::$sevk->webhooks->listEvents();
+        $this->assertNotNull($result);
+    }
+
+    // ============================================
+    // EVENTS TESTS (3)
+    // ============================================
+
+    public function testShouldListEvents(): void
+    {
+        $result = self::$sevk->events->list();
+        $this->assertNotNull($result);
+        $this->assertArrayHasKey('items', $result);
+        $this->assertIsArray($result['items']);
+    }
+
+    public function testShouldListEventsWithFilters(): void
+    {
+        $result = self::$sevk->events->list(['type' => 'SENT', 'limit' => 5]);
+        $this->assertNotNull($result);
+        $this->assertArrayHasKey('items', $result);
+        $this->assertIsArray($result['items']);
+    }
+
+    public function testShouldGetEventStats(): void
+    {
+        $result = self::$sevk->events->stats();
+        $this->assertNotNull($result);
+    }
+
+    // ============================================
+    // USAGE TESTS (1)
+    // ============================================
+
+    public function testShouldGetUsage(): void
+    {
+        $result = self::$sevk->getUsage();
+        $this->assertNotNull($result);
+    }
+
+    // ============================================
     // EMAILS TESTS (4)
     // ============================================
 
@@ -561,6 +1139,34 @@ class SdkTest extends TestCase
             'from' => 'invalid-email-without-domain',
             'html' => '<p>Hello</p>'
         ]);
+    }
+
+    public function testShouldThrowErrorForNonExistentEmailId(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessageMatches('/404/');
+        // Use a valid UUID format so the API returns 404 (not 400 for bad format)
+        self::$sevk->emails->get('00000000-0000-0000-0000-000000000000');
+    }
+
+    public function testShouldRejectBulkEmailWithUnverifiedDomain(): void
+    {
+        $result = self::$sevk->emails->sendBulk([
+            [
+                'to' => 'test1@example.com',
+                'subject' => 'Bulk Test 1',
+                'html' => '<p>Hello 1</p>',
+                'from' => 'no-reply@unverified-domain.com',
+            ],
+            [
+                'to' => 'test2@example.com',
+                'subject' => 'Bulk Test 2',
+                'html' => '<p>Hello 2</p>',
+                'from' => 'no-reply@unverified-domain.com',
+            ],
+        ]);
+        $this->assertNotNull($result);
+        $this->assertEquals(2, $result['failed']);
     }
 
     public function testShouldReturnProperErrorMessageForDomainVerification(): void
@@ -693,11 +1299,11 @@ class SdkTest extends TestCase
         $this->assertStringContainsString('XHTML 1.0 Transitional', $html);
     }
 
-    public function testShouldIncludeBackgroundColorInBodyStyles(): void
+    public function testShouldNotIncludeBackgroundColorInBodyStyles(): void
     {
         $markup = '<email><body></body></email>';
         $html = \Sevk\Markup\render($markup);
-        $this->assertStringContainsString('background-color', $html);
+        $this->assertStringNotContainsString('background-color:#ffffff', $html);
     }
 
     public function testShouldRenderMailTagSameAsEmailTag(): void

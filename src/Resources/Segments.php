@@ -52,4 +52,14 @@ class Segments
     {
         return $this->client->delete("/audiences/{$audienceId}/segments/{$segmentId}");
     }
+
+    public function calculate(string $audienceId, string $segmentId): array
+    {
+        return $this->client->get("/audiences/{$audienceId}/segments/{$segmentId}/calculate");
+    }
+
+    public function preview(string $audienceId, array $data): array
+    {
+        return $this->client->post("/audiences/{$audienceId}/segments/preview", $data);
+    }
 }

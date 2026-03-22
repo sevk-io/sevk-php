@@ -58,4 +58,14 @@ class Audiences
     {
         return $this->client->post("/audiences/{$audienceId}/contacts", ['contactIds' => $contactIds]);
     }
+
+    public function listContacts(string $audienceId, array $params = []): array
+    {
+        return $this->client->get("/audiences/{$audienceId}/contacts", $params ?: null);
+    }
+
+    public function removeContact(string $audienceId, string $contactId): array
+    {
+        return $this->client->delete("/audiences/{$audienceId}/contacts/{$contactId}");
+    }
 }

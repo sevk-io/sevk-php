@@ -15,6 +15,8 @@ use Sevk\Resources\Topics;
 use Sevk\Resources\Segments;
 use Sevk\Resources\Subscriptions;
 use Sevk\Resources\Emails;
+use Sevk\Resources\Webhooks;
+use Sevk\Resources\Events;
 
 class Sevk
 {
@@ -31,6 +33,8 @@ class Sevk
     public Segments $segments;
     public Subscriptions $subscriptions;
     public Emails $emails;
+    public Webhooks $webhooks;
+    public Events $events;
 
     public function __construct(string $apiKey, ?array $options = null)
     {
@@ -60,6 +64,8 @@ class Sevk
         $this->segments = new Segments($this);
         $this->subscriptions = new Subscriptions($this);
         $this->emails = new Emails($this);
+        $this->webhooks = new Webhooks($this);
+        $this->events = new Events($this);
     }
 
     public function request(string $method, string $path, ?array $data = null, ?array $query = null): array
@@ -112,5 +118,15 @@ class Sevk
     public function delete(string $path): array
     {
         return $this->request('DELETE', $path);
+    }
+
+    /**
+     * Get project usage and limits
+     *
+     * @return array Usage and limits data
+     */
+    public function getUsage(): array
+    {
+        return $this->get('/limits');
     }
 }
