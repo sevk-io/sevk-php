@@ -4,129 +4,59 @@ declare(strict_types=1);
 
 namespace Sevk;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
-use Sevk\Resources\Contacts;
+use Sevk\Resources\Activity;
 use Sevk\Resources\Audiences;
-use Sevk\Resources\Templates;
 use Sevk\Resources\Broadcasts;
+use Sevk\Resources\Contacts;
 use Sevk\Resources\Domains;
-use Sevk\Resources\Topics;
+use Sevk\Resources\Emails;
+use Sevk\Resources\Inbound;
+use Sevk\Resources\Outbound;
 use Sevk\Resources\Segments;
 use Sevk\Resources\Subscriptions;
-use Sevk\Resources\Emails;
+use Sevk\Resources\Templates;
+use Sevk\Resources\Topics;
+use Sevk\Resources\Usage;
 use Sevk\Resources\Webhooks;
-use Sevk\Resources\Events;
+use Sevk\Transport\HttpTransport;
+use Sevk\Transport\Transport;
 
 class Sevk
 {
-    private Client $client;
-    private string $apiKey;
-    private string $baseUrl;
+    public const VERSION = '1.1.0';
 
-    public Contacts $contacts;
-    public Audiences $audiences;
-    public Templates $templates;
-    public Broadcasts $broadcasts;
-    public Domains $domains;
-    public Topics $topics;
-    public Segments $segments;
-    public Subscriptions $subscriptions;
-    public Emails $emails;
-    public Webhooks $webhooks;
-    public Events $events;
+    public readonly Contacts $contacts;
+    public readonly Audiences $audiences;
+    public readonly Templates $templates;
+    public readonly Broadcasts $broadcasts;
+    public readonly Domains $domains;
+    public readonly Topics $topics;
+    public readonly Segments $segments;
+    public readonly Subscriptions $subscriptions;
+    public readonly Emails $emails;
+    public readonly Webhooks $webhooks;
+    public readonly Activity $activity;
+    public readonly Inbound $inbound;
+    public readonly Outbound $outbound;
+    public readonly Usage $usage;
 
-    public function __construct(string $apiKey, ?array $options = null)
+    public function __construct(string $apiKey, ?array $options = null, ?Transport $transport = null)
     {
-        $this->apiKey = $apiKey;
-        $this->baseUrl = $options['baseUrl'] ?? 'https://api.sevk.io';
-        // Ensure baseUrl ends with /
-        if (!str_ends_with($this->baseUrl, '/')) {
-            $this->baseUrl .= '/';
-        }
+        $client = $transport ?? new HttpTransport($apiKey, $options ?? []);
 
-        $this->client = new Client([
-            'base_uri' => $this->baseUrl,
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json',
-            ],
-            'http_errors' => false,
-        ]);
-
-        $this->contacts = new Contacts($this);
-        $this->audiences = new Audiences($this);
-        $this->templates = new Templates($this);
-        $this->broadcasts = new Broadcasts($this);
-        $this->domains = new Domains($this);
-        $this->topics = new Topics($this);
-        $this->segments = new Segments($this);
-        $this->subscriptions = new Subscriptions($this);
-        $this->emails = new Emails($this);
-        $this->webhooks = new Webhooks($this);
-        $this->events = new Events($this);
-    }
-
-    public function request(string $method, string $path, ?array $data = null, ?array $query = null): array
-    {
-        // Remove leading slash from path for proper URL resolution
-        $path = ltrim($path, '/');
-
-        $options = [];
-
-        if ($data !== null) {
-            $options['json'] = $data;
-        }
-
-        if ($query !== null) {
-            $options['query'] = $query;
-        }
-
-        $response = $this->client->request($method, $path, $options);
-        $statusCode = $response->getStatusCode();
-        $body = $response->getBody()->getContents();
-        $result = json_decode($body, true) ?? [];
-
-        if ($statusCode >= 400) {
-            $message = $result['message'] ?? $result['error'] ?? "HTTP Error: {$statusCode}";
-            // Handle case where message is an array (validation errors)
-            if (is_array($message)) {
-                $message = json_encode($message);
-            }
-            throw new \Exception("{$statusCode}: {$message}");
-        }
-
-        return $result;
-    }
-
-    public function get(string $path, ?array $query = null): array
-    {
-        return $this->request('GET', $path, null, $query);
-    }
-
-    public function post(string $path, ?array $data = null): array
-    {
-        return $this->request('POST', $path, $data);
-    }
-
-    public function put(string $path, ?array $data = null): array
-    {
-        return $this->request('PUT', $path, $data);
-    }
-
-    public function delete(string $path): array
-    {
-        return $this->request('DELETE', $path);
-    }
-
-    /**
-     * Get project usage and limits
-     *
-     * @return array Usage and limits data
-     */
-    public function getUsage(): array
-    {
-        return $this->get('/limits');
+        $this->contacts = new Contacts($client);
+        $this->audiences = new Audiences($client);
+        $this->templates = new Templates($client);
+        $this->broadcasts = new Broadcasts($client);
+        $this->domains = new Domains($client);
+        $this->topics = new Topics($client);
+        $this->segments = new Segments($client);
+        $this->subscriptions = new Subscriptions($client);
+        $this->emails = new Emails($client);
+        $this->webhooks = new Webhooks($client);
+        $this->activity = new Activity($client);
+        $this->inbound = new Inbound($client);
+        $this->outbound = new Outbound($client);
+        $this->usage = new Usage($client);
     }
 }

@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="https://sevk.io/logo.png" alt="Sevk" width="120" />
+  <img src="https://sevk.io/logo.png" alt="sevk" width="120" />
 </p>
 
-<h1 align="center">Sevk PHP SDK</h1>
+<h1 align="center">sevk PHP SDK</h1>
 
 <p align="center">
-  Official PHP SDK for <a href="https://sevk.io">Sevk</a> email platform.
+  Official PHP SDK for <a href="https://sevk.io">sevk</a> email platform.
 </p>
 
 <p align="center">
@@ -24,6 +24,8 @@ composer require sevk/sevk-php
 ```php
 <?php
 
+require __DIR__ . '/vendor/autoload.php';
+
 use Sevk\Sevk;
 
 $sevk = new Sevk('your-api-key');
@@ -31,7 +33,7 @@ $sevk = new Sevk('your-api-key');
 $sevk->emails->send([
     'to' => 'recipient@example.com',
     'from' => 'hello@yourdomain.com',
-    'subject' => 'Hello from Sevk!',
+    'subject' => 'Hello from sevk!',
     'html' => '<h1>Welcome!</h1>'
 ]);
 ```
@@ -41,12 +43,15 @@ $sevk->emails->send([
 ```php
 <?php
 
+require __DIR__ . '/vendor/autoload.php';
+
 use Sevk\Sevk;
-use Sevk\Markup\Renderer;
+
+use function Sevk\Markup\render;
 
 $sevk = new Sevk('your-api-key');
 
-$html = Renderer::render('
+$html = render('
   <section padding="40px 20px" background-color="#f8f9fa">
     <container max-width="600px">
       <heading level="1" color="#1a1a1a">Welcome!</heading>

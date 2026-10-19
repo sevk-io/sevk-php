@@ -4,34 +4,51 @@ declare(strict_types=1);
 
 namespace Sevk\Resources;
 
-use Sevk\Sevk;
-
-class Subscriptions
+class Subscriptions extends Resource
 {
-    private Sevk $client;
-
-    public function __construct(Sevk $client)
+    /**
+     * @param array<string, mixed>|null $data
+     * @return array{
+     *   contact: array{id: string, email: string, subscribed: bool, data?: array<string, mixed>|null},
+     *   audience?: array{id: string, name: string}|null,
+     *   alreadySubscribed?: bool,
+     *   message?: string
+     * }
+     */
+    public function subscribe(string $email, ?string $audienceId = null, ?array $data = null): array
     {
-        $this->client = $client;
+        $body = ['email' => $email];
+
+        if ($audienceId !== null) {
+            $body['audienceId'] = $audienceId;
+        }
+        if ($data !== null) {
+            $body['data'] = (object) $data;
+        }
+
+        return $this->client->post('/subscriptions/subscribe', $body);
     }
 
-    public function subscribe(string $email, string $audienceId, ?array $topicIds = null): array
+    /**
+     * @return array{
+     *   contact: array{id: string, email: string, subscribed: bool},
+     *   alreadyUnsubscribed?: bool
+     * }
+     */
+    public function unsubscribe(?string $email = null, ?string $contactId = null, ?string $broadcastId = null): array
     {
-        $data = [
-            'email' => $email,
-            'audienceId' => $audienceId,
-        ];
-        if ($topicIds !== null) $data['topicIds'] = $topicIds;
+        $body = [];
 
-        return $this->client->post('/subscriptions/subscribe', $data);
-    }
+        if ($email !== null) {
+            $body['email'] = $email;
+        }
+        if ($contactId !== null) {
+            $body['contactId'] = $contactId;
+        }
+        if ($broadcastId !== null) {
+            $body['broadcastId'] = $broadcastId;
+        }
 
-    public function unsubscribe(string $email, ?string $audienceId = null, ?array $topicIds = null): array
-    {
-        $data = ['email' => $email];
-        if ($audienceId !== null) $data['audienceId'] = $audienceId;
-        if ($topicIds !== null) $data['topicIds'] = $topicIds;
-
-        return $this->client->post('/subscriptions/unsubscribe', $data);
+        return $this->client->post('/subscriptions/unsubscribe', $body);
     }
 }
